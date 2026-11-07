@@ -25,7 +25,7 @@ test('environment proxy updates are independent, IP metadata is shown and passwo
   const dir = temp(); const backend = buildBackend(dir, { checkProxy: async () => ({ status:'ok',exitIp:'192.0.2.10',countryCode:'US',timezone:'America/New_York' }) });
   const server = backend.app.listen(0,'127.0.0.1'); await new Promise(r => server.once('listening',r));
   const request = async (endpoint, method='GET', body) => {
-    const response = await fetch(`http://127.0.0.1:${server.address().port}/api${endpoint}`, {method,headers:{'x-api-token':backend.token,'content-type':'application/json'},body:body?JSON.stringify(body):undefined});
+    const response = await fetch(`http://127.0.0.1:${server.address().port}/api${endpoint}`, {method,signal:AbortSignal.timeout(10000),headers:{'x-api-token':backend.token,'content-type':'application/json'},body:body?JSON.stringify(body):undefined});
     return { status:response.status, body:await response.json() };
   };
   try {
@@ -41,11 +41,17 @@ test('environment proxy updates are independent, IP metadata is shown and passwo
     assert.equal(profiles.find(p=>p.id===a.id).lastOpenedAt,undefined);
     await request(`/profiles/${a.id}/proxy`,'PUT',{mode:'none'});
     assert.equal(backend.store.get(a.id).lastNetwork,null);
-  } finally { await backend.browsers.closeAll(); await new Promise(r=>server.close(r));fs.rmSync(dir,{recursive:true,force:true}); }
+  } finally {
+    await backend.browsers.closeAll();
+    const closed = new Promise(resolve => server.close(resolve)); server.closeAllConnections(); await closed;
+    fs.rmSync(dir,{recursive:true,force:true});
+  }
 });
 
-test('closing last window terminates only that environment; timestamps persist and numbered macOS bundles launch', {timeout:90000}, async () => {
+test('closing last window terminates only that environment; timestamps persist and numbered macOS bundles launch', {timeout:90000}, async t => {
   const dir = temp(), store = new ProfileStore(dir), manager = new BrowserManager(store,null,null,{startPage:false, downloadsDirectory:path.join(dir,'downloads')});
+  let stage = 'opening environments';
+  t.signal.addEventListener('abort', () => t.diagnostic(`Environment lifecycle stopped during: ${stage}`), { once: true });
   try {
     const a = store.create({}), b = store.create({});
     const headless = process.platform !== 'darwin';
@@ -53,6 +59,7 @@ test('closing last window terminates only that environment; timestamps persist a
     const first = store.get(a.id).lastOpenedAt;
     assert.ok(Date.parse(first)); assert.equal(store.get(a.id).createdAt,a.createdAt);
     await manager.open(a.id,{headless}); assert.equal(store.get(a.id).lastOpenedAt,first);
+    stage = 'querying sandbox process arguments';
     const commands = profileProcesses(store.profileDir(a.id));
     assert.ok(commands.length, 'environment browser process must exist');
     assert.ok(commands.every(l => !l.includes('--no-sandbox') && !l.includes('--remote-debugging-port')));
@@ -66,17 +73,23 @@ test('closing last window terminates only that environment; timestamps persist a
       }
       assert.ok(commands.some(l=>l.includes(`CIKE-${a.sequence}-${a.id}.app/Contents/MacOS`)));
     }
+    stage = 'closing environment windows';
     const contextA = manager.getContext(a.id); const extra = await contextA.newPage();
     await extra.close(); assert.ok(manager.isOpen(a.id));
     for(const page of contextA.pages()) await page.close();
     for(let i=0;i<100 && manager.isOpen(a.id);i++) await delay(50);
     assert.equal(manager.isOpen(a.id),false); assert.equal(manager.isOpen(b.id),true);
+    stage = 'confirming closed environment exited';
     await waitForProfileExit(store.profileDir(a.id));
+    stage = 'confirming other environment still runs';
     assert.ok(profileProcesses(store.profileDir(b.id)).length, 'other environment must remain running');
+    stage = 'reopening environment and checking persisted timestamps';
     await manager.open(a.id,{headless}); assert.ok(store.get(a.id).lastOpenedAt>first);
     assert.equal(new ProfileStore(dir).get(a.id).lastOpenedAt,store.get(a.id).lastOpenedAt);
+    stage = 'closing reopened environment and confirming exit';
     await manager.close(a.id); await waitForProfileExit(store.profileDir(a.id)); assert.ok(manager.isOpen(b.id));
-  } finally { await manager.closeAll();fs.rmSync(dir,{recursive:true,force:true}); }
+  } catch (error) { t.diagnostic(`Environment lifecycle failed during: ${stage}`); throw error; }
+  finally { stage = 'closing all test environments'; await manager.closeAll();fs.rmSync(dir,{recursive:true,force:true}); }
 });
 
 test('close during pending proxy detection cancels launch without recording a last-open time', async () => {

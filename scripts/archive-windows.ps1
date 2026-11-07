@@ -11,6 +11,9 @@ foreach ($reserved in @('data','browsers','Downloads','.ci-runtime','.workflow-p
 }
 $packaged = Get-Content -LiteralPath (Join-Path $bundle 'resources/app/package.json') -Raw | ConvertFrom-Json
 if ($packaged.version -ne $version) { throw 'Packaged version mismatch.' }
+$peVersion = [Diagnostics.FileVersionInfo]::GetVersionInfo((Join-Path $bundle 'CIKE.exe'))
+$peNumber = '{0}.{1}.{2}.{3}' -f $peVersion.FileMajorPart, $peVersion.FileMinorPart, $peVersion.FileBuildPart, $peVersion.FilePrivatePart
+if ($peNumber -ne "$version.0") { throw "Packaged EXE version mismatch: $peNumber (expected $version.0)." }
 $commit = git rev-parse HEAD
 if ($LASTEXITCODE -ne 0 -or $commit -notmatch '^[a-f0-9]{40}$') { throw 'Cannot identify build commit.' }
 $artifactDir = Join-Path $PWD 'artifacts'

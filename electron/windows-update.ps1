@@ -3,6 +3,11 @@ param(
   [switch] $LibraryOnly
 )
 $ErrorActionPreference = 'Stop'
+# Resolve required cmdlets directly from the current system PowerShell install;
+# never discover modules through inherited user, network or machine search paths.
+$PSModuleAutoLoadingPreference = 'None'
+Import-Module -Name "$PSHOME\Modules\Microsoft.PowerShell.Management\Microsoft.PowerShell.Management.psd1" -Scope Local
+Import-Module -Name "$PSHOME\Modules\Microsoft.PowerShell.Utility\Microsoft.PowerShell.Utility.psd1" -Scope Local
 Set-StrictMode -Version 2
 
 # This helper is copied into the private transaction directory before it starts.

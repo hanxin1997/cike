@@ -147,6 +147,7 @@ test('package validation excludes data, custom data, unlisted roots and links', 
 
 const helperRunner = String.raw`param([string] $Helper, [string] $ManifestFile, [string] $Scenario)
 $ErrorActionPreference = 'Stop'
+$PSModuleAutoLoadingPreference = 'None'
 . $Helper -LibraryOnly
 $state = Read-UpdateManifest $ManifestFile
 if ($Scenario -eq 'tamper') {
@@ -188,7 +189,7 @@ throw 'Unknown scenario'
 `;
 
 for (const scenario of ['success', 'copy-failure', 'locked', 'startup-failure', 'tamper']) {
-  test(`Windows helper ${scenario}: program transaction preserves every data directory`, { skip: process.platform !== 'win32' }, () => {
+  test(`Windows helper ${scenario}: transaction preserves data with module auto-loading disabled`, { skip: process.platform !== 'win32' }, () => {
     const fixture = makeFixture();
     try {
       const runner = path.join(fixture.state.transaction, 'runner.ps1');

@@ -16,11 +16,18 @@ const provider = { encrypt: s => Buffer.from(s).toString('base64'), decrypt: s =
 function windowsFixture(script, target) {
   const { systemExecutable, systemEnvironment } = require('../src/platform');
   return cp.execFileSync(systemExecutable('powershell'), ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command',
-    '$ErrorActionPreference = "Stop"; [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false); ' + script,
-  ], { windowsHide: true, encoding: 'utf8', env: { ...systemEnvironment(), CIKE_ACL_TARGET: target }, timeout: 30000 }).trim();
+    '$ErrorActionPreference = "Stop"; $PSModuleAutoLoadingPreference = "None"; [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false); ' + script,
+  ], { windowsHide: true, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...systemEnvironment(), CIKE_ACL_TARGET: target }, timeout: 30000 }).trim();
 }
 function permissions(target) {
-  return JSON.parse(windowsFixture('$acl = Get-Acl -LiteralPath $env:CIKE_ACL_TARGET; @{ owner = $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value; current = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value; protected = $acl.AreAccessRulesProtected; rules = @($acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]) | ForEach-Object { @{ sid = $_.IdentityReference.Value; allow = $_.AccessControlType -eq "Allow"; full = $_.FileSystemRights -eq "FullControl"; inherited = $_.IsInherited; inheritance = [int]$_.InheritanceFlags } }) } | ConvertTo-Json -Depth 4 -Compress', target));
+  // Read actual ACLs independently from production, without importing the
+  // slow Security/Utility modules merely to format their values as JSON.
+  const output = windowsFixture('$acl = if ([IO.Directory]::Exists($env:CIKE_ACL_TARGET)) { [IO.Directory]::GetAccessControl($env:CIKE_ACL_TARGET) } else { [IO.File]::GetAccessControl($env:CIKE_ACL_TARGET) }; [Console]::WriteLine(($acl.GetOwner([Security.Principal.SecurityIdentifier]).Value, [Security.Principal.WindowsIdentity]::GetCurrent().User.Value, $acl.AreAccessRulesProtected -join "|")); foreach ($rule in $acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])) { [Console]::WriteLine(($rule.IdentityReference.Value, ($rule.AccessControlType -eq "Allow"), ($rule.FileSystemRights -eq "FullControl"), $rule.IsInherited, [int]$rule.InheritanceFlags -join "|")) }', target).split(/\r?\n/);
+  const [owner, current, protectedValue] = output.shift().split('|');
+  return { owner, current, protected: protectedValue === 'True', rules: output.map(line => {
+    const [sid, allow, full, inherited, inheritance] = line.split('|');
+    return { sid, allow: allow === 'True', full: full === 'True', inherited: inherited === 'True', inheritance: Number(inheritance) };
+  }) };
 }
 function assertPrivate(target, directory = false) {
   if (process.platform !== 'win32') return assert.equal(fs.statSync(target).mode & 0o777, directory ? 0o700 : 0o600);
@@ -97,38 +104,56 @@ test('missing, failed, stale and unknown-region proxies cannot launch or fall ba
   } finally { await manager?.closeAll(); fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('API uses header auth, rejects foreign origins, protects proxy references and redacts inline passwords', async () => {
+test('API uses header auth, rejects foreign origins, protects proxy references and redacts inline passwords', async t => {
   const { buildBackend } = require('../src/server');
   const dir = temp(), b = buildBackend(dir);
   const server = http.createServer(b.app.callback());
   await new Promise(r => server.listen(0, '127.0.0.1', r));
   const url = `http://127.0.0.1:${server.address().port}/api`;
-  const request = (p, method = 'GET', body, headers = {}) => fetch(url + p, { method, headers: { 'x-api-token': b.token, 'content-type': 'application/json', ...headers }, body: body ? JSON.stringify(body) : undefined });
+  let stage = 'starting requests';
+  t.signal.addEventListener('abort', () => t.diagnostic(`API test stopped during: ${stage}`), { once: true });
+  const reply = async (endpoint, options = {}) => {
+    stage = `${options.method || 'GET'} ${new URL(endpoint).pathname}`;
+    const response = await fetch(endpoint, { ...options, signal: AbortSignal.timeout(10000) });
+    // Drain even error responses. Otherwise the test's Undici connections can
+    // remain active while server.close waits during teardown.
+    const body = await response.text();
+    return { status: response.status, headers: response.headers, body };
+  };
+  const request = (p, method = 'GET', body, headers = {}) => reply(url + p, { method, headers: { 'x-api-token': b.token, 'content-type': 'application/json', ...headers }, body: body ? JSON.stringify(body) : undefined });
   try {
     // Koa routes are case insensitive by default: authentication must cover
     // every spelling that can reach the same route, including /API itself.
     for (const prefix of ['/api', '/API', '/Api']) {
       const endpoint = `http://127.0.0.1:${server.address().port}${prefix}/profiles`;
-      assert.equal((await fetch(endpoint)).status, 401, `${prefix} without a token`);
-      assert.equal((await fetch(endpoint, { headers: { 'x-api-token': 'invalid-token' } })).status, 401);
-      assert.equal((await fetch(endpoint, { headers: { 'x-api-token': b.token, origin: 'https://example.com' } })).status, 403);
-      assert.equal((await fetch(endpoint, { headers: { 'x-api-token': b.token } })).status, 200);
-      const preflight = await fetch(endpoint, { method: 'OPTIONS', headers: { origin: 'null' } });
+      assert.equal((await reply(endpoint)).status, 401, `${prefix} without a token`);
+      assert.equal((await reply(endpoint, { headers: { 'x-api-token': 'invalid-token' } })).status, 401);
+      assert.equal((await reply(endpoint, { headers: { 'x-api-token': b.token, origin: 'https://example.com' } })).status, 403);
+      assert.equal((await reply(endpoint, { headers: { 'x-api-token': b.token } })).status, 200);
+      const preflight = await reply(endpoint, { method: 'OPTIONS', headers: { origin: 'null' } });
       assert.equal(preflight.status, 204);
       assert.equal(preflight.headers.get('access-control-allow-origin'), 'null');
     }
-    assert.equal((await fetch(url + '/profiles?token=' + b.token)).status, 401);
+    assert.equal((await reply(url + '/profiles?token=' + b.token)).status, 401);
     assert.equal((await request('/profiles', 'GET', null, { origin: 'https://example.com' })).status, 403);
-    const preflight = await fetch(url + '/profiles', { method: 'OPTIONS', headers: { origin: 'null', 'Access-Control-Request-Headers': 'x-api-token,content-type' } });
+    const preflight = await reply(url + '/profiles', { method: 'OPTIONS', headers: { origin: 'null', 'Access-Control-Request-Headers': 'x-api-token,content-type' } });
     assert.equal(preflight.status, 204);
     const p = b.store.create({ proxy: { server: 'http://127.0.0.1:9', password: 'fixture-secret' } });
-    assert.ok(!(await (await request('/profiles')).text()).includes('fixture-secret'));
+    assert.ok(!(await request('/profiles')).body.includes('fixture-secret'));
     const x = b.proxyStore.add({ type: 'http', host: '127.0.0.1', port: 9 });
     b.store.update(p.id, { proxyId: x.id });
     assert.equal((await request('/proxies/' + x.id, 'DELETE')).status, 409);
     assert.equal((await request('/profiles/' + p.id, 'PATCH', { proxyId: null })).status, 200);
     assert.equal((await request('/proxies/' + x.id, 'DELETE')).status, 200);
-  } finally { await b.browsers.closeAll(); await new Promise(r => server.close(r)); fs.rmSync(dir, { recursive: true, force: true }); }
+  } catch (error) {
+    t.diagnostic(`API test failed during: ${stage}`); throw error;
+  } finally {
+    stage = 'closing browser fixtures'; await b.browsers.closeAll();
+    stage = 'closing HTTP fixture';
+    const closed = new Promise(resolve => server.close(resolve));
+    server.closeAllConnections(); await closed;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('private files preserve encrypted credentials, reject damaged records and label OS storage accurately', () => {
@@ -177,18 +202,21 @@ test('POSIX private paths accept normal symlinked ancestors such as macOS /var',
 });
 
 test('Windows private ACL removes inherited and explicit public access without modifying parent permissions', { skip: process.platform !== 'win32' }, () => {
-  const dir = temp(), data = path.join(dir, 'data 中文'), browsers = path.join(dir, 'browsers');
+  // Brackets, quotes, spaces and Chinese characters must remain literal paths.
+  const dir = temp(), data = path.join(dir, "data [中文] 'space"), browsers = path.join(dir, 'browsers');
   fs.mkdirSync(data); fs.mkdirSync(browsers);
   try {
     // Add an explicit Everyone grant in addition to the inherited temp ACL.
-    const grant = '$acl = Get-Acl -LiteralPath $env:CIKE_ACL_TARGET; $sid = New-Object Security.Principal.SecurityIdentifier("S-1-1-0"); $rule = New-Object Security.AccessControl.FileSystemAccessRule($sid, "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow"); $acl.AddAccessRule($rule); Set-Acl -LiteralPath $env:CIKE_ACL_TARGET -AclObject $acl';
+    const grant = '$acl = [IO.Directory]::GetAccessControl($env:CIKE_ACL_TARGET); $sid = [Security.Principal.SecurityIdentifier]::new("S-1-1-0"); $rule = [Security.AccessControl.FileSystemAccessRule]::new($sid, "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow"); $acl.AddAccessRule($rule); [IO.Directory]::SetAccessControl($env:CIKE_ACL_TARGET, $acl)';
     windowsFixture(grant, data);
-    const parentBefore = windowsFixture('(Get-Acl -LiteralPath $env:CIKE_ACL_TARGET).Sddl', dir);
+    const parentSddl = '[Console]::WriteLine([IO.Directory]::GetAccessControl($env:CIKE_ACL_TARGET).GetSecurityDescriptorSddlForm([Security.AccessControl.AccessControlSections]::All))';
+    const parentBefore = windowsFixture(parentSddl, dir);
+    assert.match(parentBefore, /D:/, 'parent ACL snapshot must include an actual DACL');
     privateDirectory(data); privateDirectory(browsers);
     assertPrivate(data, true); assertPrivate(browsers, true);
     windowsFixture(grant, data);
     privateDirectory(data); assertPrivate(data, true);
-    assert.equal(windowsFixture('(Get-Acl -LiteralPath $env:CIKE_ACL_TARGET).Sddl', dir), parentBefore);
+    assert.equal(windowsFixture(parentSddl, dir), parentBefore);
     const file = path.join(data, 'api_token.txt');
     fs.writeFileSync(file, 'fixture'); protectFile(file); assertPrivate(file);
     // A newly created directory within the same process must also be private.

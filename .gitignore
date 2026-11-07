@@ -9,6 +9,7 @@ electron/dist/
 Thumbs.db
 browsers/
 Downloads/
+artifacts/
 .ci-runtime/
 .workflow-publish/
 .workflow-validation/

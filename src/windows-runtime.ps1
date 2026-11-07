@@ -5,6 +5,11 @@ param(
   [string]$Executable
 )
 $ErrorActionPreference = 'Stop'
+# Load only the modules shipped beside this PowerShell executable. Automatic
+# discovery can scan unrelated machine/user modules for tens of seconds on CI.
+$PSModuleAutoLoadingPreference = 'None'
+Import-Module -Name "$PSHOME\Modules\Microsoft.PowerShell.Management\Microsoft.PowerShell.Management.psd1" -Scope Local
+Import-Module -Name "$PSHOME\Modules\Microsoft.PowerShell.Utility\Microsoft.PowerShell.Utility.psd1" -Scope Local
 [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
 
 if ($Operation -eq 'Version') {

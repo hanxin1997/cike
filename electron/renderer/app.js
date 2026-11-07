@@ -854,7 +854,9 @@ document.getElementById('btn-install-update').onclick = async () => {
   const status = document.getElementById('update-status');
   status.textContent = '正在下载并校验…';
   const unsubscribe = window.lfb.onUpdateProgress(progress => {
-    status.textContent = progress.message || (Number.isFinite(progress.pct) ? `下载更新 ${progress.pct}%` : '正在准备更新…');
+    const pct = Number.isFinite(progress.pct) ? progress.pct : progress.total ? Math.floor(progress.received / progress.total * 100) : null;
+    status.textContent = progress.message || (progress.phase === 'verify' ? '正在校验安装包…'
+      : progress.phase === 'restart' ? '正在退出并安装更新…' : pct !== null ? `下载更新 ${pct}%` : '正在准备更新…');
   });
   try {
     const result = await window.lfb.installUpdate();

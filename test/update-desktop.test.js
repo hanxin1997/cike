@@ -3,6 +3,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
+const { execFileSync } = require('child_process');
 const { _electron } = require('playwright');
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -62,6 +63,18 @@ test('packaged updater hands off to the real Windows helper, restarts and preser
     for (const folder of ['data','browsers','Downloads']) assert.equal(fs.readFileSync(path.join(directory, folder, 'preserved-fixture.txt'), 'utf8'), folder);
     assert.equal(fs.existsSync(path.join(directory, 'data/browsers')), false);
     assert.equal(fs.existsSync(path.join(directory, 'data/Downloads')), false);
+  } catch (error) {
+    // Keep the original transaction error visible even if a rollback relaunch
+    // leaves files open while the fixture is being cleaned up.
+    try {
+      for (const name of fs.readdirSync(path.join(directory, 'data/updates'))) {
+        for (const log of ['status.json','helper.log','preparation-error.json']) {
+          const file = path.join(directory, 'data/updates', name, log);
+          if (fs.existsSync(file)) console.error(`${log}: ${fs.readFileSync(file, 'utf8')}`);
+        }
+      }
+    } catch {}
+    throw error;
   } finally {
     await app?.close().catch(() => {});
     if (!restartedPid) {
@@ -75,6 +88,15 @@ test('packaged updater hands off to the real Windows helper, restarts and preser
     }
     // Only the exact test-owned process identified by its startup confirmation is stopped.
     if (Number.isInteger(restartedPid) && restartedPid !== process.pid) { try { process.kill(restartedPid); } catch {} }
+    assert.ok(directory.startsWith(fixtureParent + path.sep));
+    // A failed transaction can relaunch the old app without confirmed.json.
+    // Match the exact test executable path, including any renderer children.
+    try {
+      const { systemExecutable, systemEnvironment } = require('../src/platform');
+      execFileSync(systemExecutable('powershell'), ['-NoLogo','-NoProfile','-NonInteractive','-Command',
+        '$PSModuleAutoLoadingPreference="None"; Import-Module ($PSHOME + "/Modules/Microsoft.PowerShell.Utility/Microsoft.PowerShell.Utility.psd1"); Import-Module ($PSHOME + "/Modules/CimCmdlets/CimCmdlets.psd1"); foreach ($item in (Get-CimInstance Win32_Process)) { if ($item.ExecutablePath -eq $env:CIKE_TEST_EXECUTABLE) { try { [Diagnostics.Process]::GetProcessById($item.ProcessId).Kill() } catch {} } }'],
+      { env: { ...systemEnvironment(), CIKE_TEST_EXECUTABLE: path.join(directory, 'CIKE.exe') }, timeout: 30000, windowsHide: true, stdio: 'ignore' });
+    } catch {}
     await delay(1000);
     assert.ok(directory.startsWith(fixtureParent + path.sep));
     fs.rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 });

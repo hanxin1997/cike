@@ -217,7 +217,7 @@ function writeJSON(file, value) {
   fs.writeFileSync(staging, JSON.stringify(value, null, 2), { mode: 0o600 });
   fs.renameSync(staging, file);
 }
-async function waitForHelper(transaction, child, timeout = 15000) {
+async function waitForHelper(transaction, child, timeout = 120000) {
   const started = Date.now();
   while (Date.now() - started < timeout) {
     try {

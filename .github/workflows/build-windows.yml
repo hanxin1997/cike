@@ -47,10 +47,12 @@ jobs:
           node scripts/prepare-test-browser.cjs
           if ($LASTEXITCODE -ne 0) { throw 'Application Chromium installation failed.' }
       - name: Security, network, portable paths and update regression tests
+        timeout-minutes: 12
         run: |
           npm test
           if ($LASTEXITCODE -ne 0) { throw 'Regression tests failed.' }
       - name: Desktop integration tests
+        timeout-minutes: 5
         run: |
           npm run test:desktop
           if ($LASTEXITCODE -ne 0) { throw 'Desktop integration tests failed.' }

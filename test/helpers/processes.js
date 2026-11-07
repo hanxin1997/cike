@@ -8,14 +8,17 @@ function processCommands() {
   }
   // Query actual Windows process command lines without a shell or localized
   // table formatting. Encoding both ends explicitly preserves Chinese paths.
-  const script = '[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false); @((Get-CimInstance Win32_Process | Where-Object { $_.CommandLine } | Select-Object -ExpandProperty CommandLine)) | ConvertTo-Json -Compress';
+  // Avoid auto-discovery of unrelated PowerShell modules on hosted Windows.
+  // CimCmdlets initializes its aliases through Utility's Set-Alias. Import
+  // both inbox modules explicitly so disabling discovery still permits CIM.
+  // Base64 lines avoid JSON formatting and preserve exact argv.
+  const script = '$ErrorActionPreference = "Stop"; $PSModuleAutoLoadingPreference = "None"; Import-Module ($PSHOME + "\\Modules\\Microsoft.PowerShell.Utility\\Microsoft.PowerShell.Utility.psd1"); Import-Module ($PSHOME + "\\Modules\\CimCmdlets\\CimCmdlets.psd1"); foreach ($item in (Get-CimInstance Win32_Process -Property CommandLine -OperationTimeoutSec 10)) { if ($item.CommandLine) { [Console]::WriteLine([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($item.CommandLine))) } }';
   const { systemExecutable, systemEnvironment } = require('../../src/platform');
   const output = cp.execFileSync(systemExecutable('powershell'), [
     '-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script,
   ], { env: systemEnvironment(), encoding: 'utf8', windowsHide: true, timeout: 30000, maxBuffer: 8 * 1024 * 1024 }).trim();
   if (!output) return [];
-  const commands = JSON.parse(output.replace(/^\uFEFF/, ''));
-  return Array.isArray(commands) ? commands : [commands];
+  return output.split(/\r?\n/).map(line => Buffer.from(line, 'base64').toString('utf8'));
 }
 
 function profileProcesses(profileDir, commands = processCommands()) {

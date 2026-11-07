@@ -19,7 +19,8 @@ test('packaged updater hands off to the real Windows helper, restarts and preser
   for (const key of ['LFB_DATA','LFB_BROWSER_DIR','LFB_DOWNLOADS_DIR','LFB_TEMP_DIR','LFB_CHROMIUM_EXECUTABLE','CIKE_UPDATE_TOKEN']) delete env[key];
   let app, restartedPid;
   try {
-    app = await _electron.launch({ executablePath: path.join(directory, 'CIKE.exe'), args: [], env, timeout: 60000 });
+    assert.ok(fs.statSync(path.join(directory, 'CIKE.exe')).isFile());
+    app = await _electron.launch({ executablePath: '.\\CIKE.exe', cwd: directory, args: [], env, timeout: 60000 });
     const page = await app.firstWindow();
     await page.waitForFunction(() => window.lfb?.apiBase);
     const portable = await page.evaluate(() => window.lfb.paths);

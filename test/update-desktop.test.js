@@ -23,8 +23,9 @@ test('packaged updater hands off to the real Windows helper, restarts and preser
   try {
     assert.ok(fs.statSync(path.join(directory, 'CIKE.exe')).isFile());
     app = await _electron.launch({ executablePath: '.\\CIKE.exe', cwd: directory, args: [], env, timeout: 60000 });
-    const page = await app.firstWindow();
-    await page.waitForFunction(() => window.lfb?.apiBase);
+    const page = await app.firstWindow({ timeout: 30000 });
+    page.setDefaultTimeout(30000);
+    await page.waitForFunction(() => window.lfb?.apiBase, null, { timeout: 30000 });
     const portable = await page.evaluate(() => window.lfb.paths);
     for (const folder of ['data','browsers','Downloads']) fs.writeFileSync(path.join(directory, folder, 'preserved-fixture.txt'), folder);
     const result = await app.evaluate(async ({ app }, fixture) => {

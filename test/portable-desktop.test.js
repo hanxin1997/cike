@@ -21,12 +21,19 @@ test('packaged Windows app installs its own kernel beside the executable and sur
   for (const name of ['LFB_DATA','LFB_BROWSER_DIR','LFB_DOWNLOADS_DIR','LFB_TEMP_DIR','LFB_CHROMIUM_EXECUTABLE']) delete env[name];
   let app;
   const launch = async () => {
+    console.log('Portable test: launching', directory);
     assert.ok(fs.statSync(path.join(directory, 'CIKE.exe')).isFile());
     // Playwright launches Electron through cmd on Windows. Keep the executable
     // token simple while the OS cwd still exercises the full Unicode/space path.
     app = await _electron.launch({ executablePath: '.\\CIKE.exe', cwd: directory, args: [], env, timeout: 60000 });
-    const page = await app.firstWindow();
-    await page.waitForFunction(() => window.lfb?.apiBase);
+    app.on('console', message => console.log('Portable main:', message.text()));
+    const page = await app.firstWindow({ timeout: 30000 });
+    page.setDefaultTimeout(30000);
+    page.on('pageerror', error => console.error('Portable renderer error:', error.message));
+    page.on('console', message => { if (message.type() === 'error') console.error('Portable console:', message.text()); });
+    console.log('Portable test: main window URL', page.url());
+    try { await page.waitForFunction(() => window.lfb?.apiBase, null, { timeout: 30000 }); }
+    catch (error) { console.error('Portable page text:', await page.locator('body').innerText()); throw error; }
     await page.locator('[data-page="settings"]').click();
     const paths = await page.evaluate(() => window.lfb.paths);
     assert.equal(paths.dataDir, path.join(directory, 'data'));
@@ -40,15 +47,21 @@ test('packaged Windows app installs its own kernel beside the executable and sur
     for (const actual of Object.values(systemPaths)) {
       assert.ok(actual.toLowerCase().startsWith((directory + path.sep).toLowerCase()), `Path escaped executable directory: ${actual}`);
     }
-    await page.waitForFunction(expected => document.querySelector('#set-data-dir').value === expected, paths.dataDir);
+    await page.waitForFunction(expected => document.querySelector('#set-data-dir').value === expected, paths.dataDir, { timeout: 30000 });
+    console.log('Portable test: connected with paths', JSON.stringify(paths));
     return page;
   };
   try {
     let page = await launch();
+    console.log('Portable test: downloading Chromium through UI');
     await page.locator('#btn-download-browser').click();
-    await page.waitForFunction(() => document.querySelector('#btn-download-browser').textContent === 'Chromium 已安装', null, { timeout: 300000 });
+    await page.waitForFunction(() => {
+      const button = document.querySelector('#btn-download-browser');
+      return button.textContent === 'Chromium 已安装' || !button.disabled;
+    }, null, { timeout: 300000 });
     const status = await page.evaluate(() => window.lfb.chromiumStatus());
-    assert.ok(status.installed);
+    console.log('Portable test: kernel status', JSON.stringify(status));
+    assert.ok(status.installed, `Kernel installation failed: ${await page.locator('#toast-root').innerText()}`);
     assert.equal(status.version, status.targetVersion);
     assert.ok(status.executable.startsWith(path.join(directory, 'browsers') + path.sep));
     const marker = fs.readFileSync(path.join(directory, 'browsers/chromium-executable.txt'), 'utf8').trim();

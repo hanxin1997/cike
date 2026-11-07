@@ -37,7 +37,7 @@ jobs:
 
     steps:
       - name: Check out upstream source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: chainfix/cike
           ref: ${{ inputs.upstream_ref || 'main' }}
@@ -47,7 +47,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: '22'
           cache: npm
@@ -85,7 +85,8 @@ jobs:
             throw 'Upstream no longer supplies electron-packager; review this workflow.'
           }
           # Invoke Node directly: a .cmd shim can interpret the regex pipes as shell operators.
-          node $packager . CIKE --platform=win32 --arch=x64 --out=dist --overwrite --prune '--ignore=^/(test|tests|\.browsers|dist|\.git|\.github|data)(/|$)'
+          # Packager 20's CLI defaults to ASAR; the resource checks below require expanded files.
+          node $packager . CIKE --platform=win32 --arch=x64 --out=dist --overwrite --prune --no-asar '--ignore=^/(test|tests|\.browsers|dist|\.git|\.github|data)(/|$)'
           if ($LASTEXITCODE -ne 0) { throw 'Windows packaging failed.' }
 
       - name: Verify package and create ZIP
@@ -162,7 +163,7 @@ jobs:
           ) >> $env:GITHUB_STEP_SUMMARY
 
       - name: Upload Windows ZIP and checksums
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: CIKE-${{ steps.source.outputs.version }}-win-x64-${{ steps.source.outputs.short_sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: |

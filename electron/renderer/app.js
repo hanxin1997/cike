@@ -764,9 +764,13 @@ async function loadSettings() {
   await refreshChromiumStatus();
 }
 
+let downloadingChromium = false;
 async function refreshChromiumStatus() {
   try {
-    state.chromium = await window.lfb.chromiumStatus();
+    const status = await window.lfb.chromiumStatus();
+    // An older status request must not re-enable controls during installation.
+    if (downloadingChromium) return;
+    state.chromium = status;
     const el = document.getElementById('browser-status');
     const btn = document.getElementById('btn-download-browser');
     if (state.chromium.installed) {
@@ -788,6 +792,8 @@ function updateBanner() {
 }
 
 async function startChromiumDownload() {
+  if (downloadingChromium) return;
+  downloadingChromium = true;
   const btn = document.getElementById('btn-download-browser');
   const bar = document.getElementById('browser-progress');
   btn.disabled = true;
@@ -799,7 +805,7 @@ async function startChromiumDownload() {
     if (!r.ok) throw new Error(r.error);
     toast('Chromium 下载完成');
   } catch (e) { toast('下载失败：' + e.message, true); }
-  finally { unsubscribe(); }
+  finally { unsubscribe(); downloadingChromium = false; }
   bar.classList.add('hidden');
   await refreshChromiumStatus();
 }

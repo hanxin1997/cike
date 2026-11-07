@@ -10,10 +10,8 @@ const { ProxyStore } = require('../src/proxystore');
 
 test('sandboxed desktop UI can authenticate, migrate profiles and protect secrets with safeStorage', { timeout: 60000 }, async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cike-desktop-'));
-  if (process.env.LFB_CHROMIUM_EXECUTABLE) {
-    fs.mkdirSync(path.join(dir, 'browsers'));
-    fs.writeFileSync(path.join(dir, 'browsers/chromium-executable.txt'), process.env.LFB_CHROMIUM_EXECUTABLE);
-  }
+  // Explicit test executable overrides are inherited through the environment.
+  // Installed markers are reserved for kernels inside the portable browser directory.
   const profiles = new ProfileStore(dir), proxies = new ProxyStore(dir);
   // Re-signed ad-hoc packages can require interactive Keychain approval on
   // macOS. Exercise encryption in the stable source Electron binary; package

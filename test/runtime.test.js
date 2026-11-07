@@ -5,7 +5,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const http = require('http');
-const cp = require('child_process');
+const { profileProcesses, waitForProfileExit } = require('./helpers/processes');
 const { ProfileStore } = require('../src/store');
 const { BrowserManager } = require('../src/browser');
 
@@ -69,13 +69,14 @@ test('native fingerprints agree across realms, sandbox stays enabled and five st
     assert.deepEqual(await storage(page, true), expected);
     const service = await page.evaluate(async () => { const reg = await navigator.serviceWorker.ready; return new Promise(resolve => { const ch = new MessageChannel(); ch.port1.onmessage = e => resolve(e.data); reg.active.postMessage('probe', [ch.port2]); }); });
     assert.deepEqual(service, main);
-    const lines = cp.execFileSync('ps', ['-axo', 'command='], { encoding: 'utf8' }).split('\n').filter(l => l.includes('--user-data-dir=' + store.profileDir(a.id)));
+    const lines = profileProcesses(store.profileDir(a.id));
     assert.ok(lines.length); assert.ok(lines.every(l => !l.includes('--no-sandbox') && !l.includes('--remote-debugging-port')));
     assert.ok(lines.some(l => l.includes('--site-per-process')));
     assert.ok(lines.some(l => l.includes('disable_non_proxied_udp')));
     await manager.open(b.id, { headless }); const pageB = await manager.getContext(b.id).newPage(); await pageB.goto(origin);
     assert.deepEqual(await storage(pageB, false), { cookie: '', local: null, idb: null, cache: null, sw: 0 });
-    await manager.close(a.id); await manager.open(a.id, { headless });
+    await manager.close(a.id); await waitForProfileExit(store.profileDir(a.id));
+    await manager.open(a.id, { headless });
     const again = await manager.getContext(a.id).newPage(); await again.goto(origin);
     assert.deepEqual(await storage(again, false), expected);
     assert.deepEqual(await again.evaluate(fingerprint), main);

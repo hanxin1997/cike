@@ -141,13 +141,17 @@
           <div class="row"><input id="set-api-token" class="input mono" readonly type="password"><button class="btn small" id="btn-token-show">显示</button><button class="btn small" data-copy="set-api-token">复制</button></div>
           <label>数据目录</label>
           <div class="row"><input id="set-data-dir" class="input" readonly><button class="btn small" id="btn-open-data">打开</button></div>
+          <label>内核目录</label>
+          <div class="row"><input id="set-browser-dir" class="input" readonly></div>
+          <label>下载文件目录</label>
+          <div class="row"><input id="set-downloads-dir" class="input" readonly></div>
         </div>
         <div class="card">
           <h2>浏览器内核</h2>
           <div id="browser-status" class="kv">检测中…</div>
           <div id="browser-progress" class="progress hidden"><div class="bar"></div></div>
           <div class="row"><button id="btn-download-browser" class="btn primary">下载 Chromium</button></div>
-          <p class="hint">按本版本锁定的 Playwright 版本下载匹配内核，保存在 CIKE 数据目录中；更新内核后重新打开环境生效。</p>
+          <p class="hint">下载与当前版本匹配的 Chromium。Windows 默认将内核保存在程序文件夹的 browsers 中；更新后重新打开环境生效。</p>
         </div>
         <div class="card">
           <h2>网络</h2>
@@ -159,7 +163,7 @@
           <h2>软件更新</h2>
           <div id="update-status" class="kv">尚未检查</div>
           <div class="row"><button id="btn-check-update" class="btn small">检查更新</button><button id="btn-install-update" class="btn primary small hidden">下载并安装</button></div>
-          <p class="hint">仅支持已安装到“应用程序”的 Apple 芯片版。安装时 macOS 会要求确认权限，完成后自动重启。</p>
+          <p class="hint">启动后检查此版本维护者发布的更新，确认后安装并重启。Windows 更新会保留程序文件夹中的 data、browsers 和 Downloads；源码运行请手动更新。</p>
         </div>
         <div class="card">
           <h2>关于</h2>

@@ -5,6 +5,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const cp = require('child_process');
+const { profileProcesses, waitForProfileExit } = require('./helpers/processes');
 const { ProfileStore } = require('../src/store');
 const { BrowserManager } = require('../src/browser');
 const { buildBackend } = require('../src/server');
@@ -52,6 +53,10 @@ test('closing last window terminates only that environment; timestamps persist a
     const first = store.get(a.id).lastOpenedAt;
     assert.ok(Date.parse(first)); assert.equal(store.get(a.id).createdAt,a.createdAt);
     await manager.open(a.id,{headless}); assert.equal(store.get(a.id).lastOpenedAt,first);
+    const commands = profileProcesses(store.profileDir(a.id));
+    assert.ok(commands.length, 'environment browser process must exist');
+    assert.ok(commands.every(l => !l.includes('--no-sandbox') && !l.includes('--remote-debugging-port')));
+    assert.ok(commands.some(l => l.includes('--site-per-process')));
     if (!headless) {
       for (const p of [a,b]) {
         const bundle = path.join(dir,'browsers/apps',`CIKE-${p.sequence}-${p.id}.app`);
@@ -59,20 +64,18 @@ test('closing last window terminates only that environment; timestamps persist a
         assert.equal(cp.execFileSync('/usr/libexec/PlistBuddy',['-c','Print :CFBundleDisplayName',path.join(bundle,'Contents/Info.plist')],{encoding:'utf8'}).trim(),`CIKE #${p.sequence}`);
         assert.ok(fs.statSync(path.join(bundle,'Contents/Resources/cike-profile.icns')).size>1000);
       }
-      const commands=cp.execFileSync('ps',['-axo','command='],{encoding:'utf8'}).split('\n').filter(l=>l.includes('--user-data-dir='+store.profileDir(a.id)));
       assert.ok(commands.some(l=>l.includes(`CIKE-${a.sequence}-${a.id}.app/Contents/MacOS`)));
-      assert.ok(commands.every(l=>!l.includes('--no-sandbox')));
     }
     const contextA = manager.getContext(a.id); const extra = await contextA.newPage();
     await extra.close(); assert.ok(manager.isOpen(a.id));
     for(const page of contextA.pages()) await page.close();
     for(let i=0;i<100 && manager.isOpen(a.id);i++) await delay(50);
     assert.equal(manager.isOpen(a.id),false); assert.equal(manager.isOpen(b.id),true);
-    const live=cp.execFileSync('ps',['-axo','command='],{encoding:'utf8'});
-    assert.ok(!live.includes('--user-data-dir='+store.profileDir(a.id)));
+    await waitForProfileExit(store.profileDir(a.id));
+    assert.ok(profileProcesses(store.profileDir(b.id)).length, 'other environment must remain running');
     await manager.open(a.id,{headless}); assert.ok(store.get(a.id).lastOpenedAt>first);
     assert.equal(new ProfileStore(dir).get(a.id).lastOpenedAt,store.get(a.id).lastOpenedAt);
-    await manager.close(a.id); assert.ok(manager.isOpen(b.id));
+    await manager.close(a.id); await waitForProfileExit(store.profileDir(a.id)); assert.ok(manager.isOpen(b.id));
   } finally { await manager.closeAll();fs.rmSync(dir,{recursive:true,force:true}); }
 });
 

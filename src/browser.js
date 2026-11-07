@@ -25,7 +25,8 @@ class BrowserManager {
     this.store = store;
     this.proxyStore = proxyStore;
     this.settings = settings;
-    this.downloadsDirectory = options.downloadsDirectory;
+    this.paths = require('./runtime-paths').pathsForData(store.dataDir);
+    this.downloadsDirectory = options.downloadsDirectory || this.paths.downloadsDir;
     this.checkProxy = options.checkProxy || checkProxy;
     this.sessions = new Map();
     this.opening = new Map();
@@ -41,7 +42,9 @@ class BrowserManager {
       headless: s.headless, opened_at: new Date(s.openedAt).toISOString(), network: s.network }));
   }
   async open(id, options = {}) {
+    if (this.shuttingDown) throw Object.assign(new Error('应用正在退出或更新，请稍后再打开环境'), { status: 503 });
     if (this.closing.has(id)) await this.closing.get(id);
+    if (this.shuttingDown) throw Object.assign(new Error('应用正在退出或更新，请稍后再打开环境'), { status: 503 });
     if (this.opening.has(id)) return this.opening.get(id);
     this.cancelled.delete(id);
     const pending = this._open(id, options);
@@ -100,6 +103,8 @@ class BrowserManager {
       const { options } = buildContextOptions({ ...effective, proxy });
       const debugPort = process.env.LFB_EXPOSE_DEBUGGER === '1' ? await findFreePort(4550, 4599) : null;
       const launchOptions = { ...options, headless, chromiumSandbox: true,
+        // The child browser must inherit the same private temp root as the app.
+        env: { ...process.env, TEMP: this.paths.tempDir, TMP: this.paths.tempDir, TMPDIR: this.paths.tempDir },
         ignoreDefaultArgs: ['--enable-automation'],
         args: ['--no-first-run', '--no-default-browser-check', '--site-per-process', '--disable-background-mode',
           '--disable-blink-features=AutomationControlled',
@@ -110,7 +115,10 @@ class BrowserManager {
       };
       // Deliberately no arbitrary LFB_EXTRA_ARGS: they could disable sandbox,
       // alter proxy routing or invalidate the native consistency contract.
-      if (process.env.LFB_CHROMIUM_EXECUTABLE) launchOptions.executablePath = process.env.LFB_CHROMIUM_EXECUTABLE;
+      if (process.platform === 'win32') privateDirectory(this.paths.tempDir);
+      else require('fs').mkdirSync(this.paths.tempDir, { recursive: true });
+      const executable = process.env.LFB_CHROMIUM_EXECUTABLE || require('../electron/chromium').readInstalledExecutable(this.store.dataDir);
+      if (executable) launchOptions.executablePath = executable;
       checkCancelled();
       if (!headless && this.profileIcons) {
         launchOptions.executablePath = await require('./profileapp').ensureProfileApp(this.store.dataDir, profile, launchOptions.executablePath || chromium.executablePath());

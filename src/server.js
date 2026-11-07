@@ -12,10 +12,19 @@
  * Everything runs locally. No vendor backend, no account system.
  */
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 const net = require('net');
+// The standalone CLI must set its process temp environment before Playwright
+// is imported, just as Electron's early portable bootstrap does on desktop.
+if (require.main === module && process.platform === 'win32') {
+  const paths = require('./runtime-paths').resolveRuntimePaths();
+  const { privateDirectory } = require('./privatefiles');
+  for (const directory of [paths.dataDir, paths.browserDir, paths.tempDir, paths.downloadsDir]) privateDirectory(directory);
+  Object.assign(process.env, { LFB_DATA: paths.dataDir, LFB_BROWSER_DIR: paths.browserDir,
+    LFB_DOWNLOADS_DIR: paths.downloadsDir, LFB_TEMP_DIR: paths.tempDir,
+    TEMP: paths.tempDir, TMP: paths.tempDir, TMPDIR: paths.tempDir });
+}
 const Koa = require('koa');
 const Router = require('@koa/router');
 const bodyParser = require('koa-bodyparser');
@@ -27,11 +36,11 @@ const { checkProxy } = require('./proxycheck');
 const { Settings } = require('./settings');
 
 const VERSION = require('../package.json').version;
-const DATA_DIR = process.env.LFB_DATA || path.join(os.homedir(), '.local-fingerprint-browser');
+const DATA_DIR = require('./runtime-paths').resolveRuntimePaths().dataDir;
 const PORT_MIN = 4440;
 const PORT_MAX = 4539;
 const DISCOVERY_FILE = 'local_api_url.txt';
-const { privateDirectory, writePrivate } = require('./privatefiles');
+const { privateDirectory, protectFile, writePrivate } = require('./privatefiles');
 const { HOST_PLATFORM } = require('./fingerprint');
 const TOKEN_FILE = 'api_token.txt';
 
@@ -43,8 +52,7 @@ function ensureDataDir(dir) {
 function getToken(dir) {
   const f = path.join(dir, TOKEN_FILE);
   try {
-    if (!fs.lstatSync(f).isFile()) throw new Error('Token 必须是普通文件');
-    fs.chmodSync(f, 0o600);
+    protectFile(f);
     const t = fs.readFileSync(f, 'utf8').trim();
     if (/^[a-f0-9]{48}$/.test(t)) return t;
     throw new Error('Token 文件损坏');
@@ -103,7 +111,8 @@ function buildBackend(dataDir = DATA_DIR, options = {}) {
   });
 
   app.use(async (ctx, next) => {
-    if (!ctx.path.startsWith('/api/')) return next();
+    // Protect the entire local server: router matching is case insensitive,
+    // and a path-prefix check must never create an unauthenticated route.
     const origin = ctx.get('origin');
     if (origin && origin !== 'null') ctx.throw(403, 'browser origin not allowed');
     if (origin === 'null') {
@@ -330,7 +339,7 @@ async function main() {
   const b = await startBackend();
   console.log(`[LocalAPI] listening on ${b.url}`);
   console.log(`[LocalAPI] discovery file: ${path.join(b.dataDir, DISCOVERY_FILE)}`);
-  console.log(`[LocalAPI] token file (0600): ${path.join(b.dataDir, TOKEN_FILE)}`);
+  console.log(`[LocalAPI] token file (private OS permissions): ${path.join(b.dataDir, TOKEN_FILE)}`);
   console.log(`[LocalAPI] data dir: ${b.dataDir}`);
 
   const shutdown = async () => {

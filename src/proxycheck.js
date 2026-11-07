@@ -3,6 +3,7 @@ const { spawn } = require('child_process');
 const net = require('net');
 const { proxyURL, validateProxy } = require('./proxyconfig');
 const { SocksForwarder } = require('./socksfwd');
+const { systemExecutable, systemEnvironment } = require('./platform');
 const quote = value => '"' + String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n').replace(/\r/g, '\\r') + '"';
 
 function curl(proxy, url, timeoutMs = 12000) {
@@ -12,8 +13,8 @@ function curl(proxy, url, timeoutMs = 12000) {
     'connect-timeout = 8', 'noproxy = ""', `proxy = ${quote(proxyURL(proxy, true))}`,
     `url = ${quote(url)}`, ...(proxy.username || proxy.password ? [`proxy-user = ${quote(`${proxy.username || ''}:${proxy.password || ''}`)}`] : [])].join('\n') + '\n';
   return new Promise((resolve, reject) => {
-    const child = spawn('/usr/bin/curl', ['-q', '--config', '-'], {
-      env: { PATH: '/usr/bin:/bin', LANG: 'C', HOME: process.env.HOME }, stdio: ['pipe', 'pipe', 'ignore'],
+    const child = spawn(systemExecutable('curl'), ['-q', '--config', '-'], {
+      env: systemEnvironment(), windowsHide: true, stdio: ['pipe', 'pipe', 'ignore'],
     });
     let output = '', tooLarge = false;
     const timer = setTimeout(() => child.kill('SIGKILL'), timeoutMs + 1000);

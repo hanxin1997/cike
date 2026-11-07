@@ -13,18 +13,23 @@
   "main": "electron/main.js",
   "name": "cike",
   "scripts": {
-    "test": "node --test --test-concurrency=1 test/security.test.js test/network.test.js test/runtime.test.js test/downloads.js test/environments.test.js",
+    "test": "node --test --test-concurrency=1 test/security.test.js test/network.test.js test/runtime.test.js test/downloads.js test/environments.test.js test/windows.test.js test/portable.test.js test/updater.test.js",
     "test:desktop": "node --test test/desktop.test.js",
     "test:icons": "node --test test/profile-icons.test.js",
     "smoke": "node test/smoke.js",
     "start": "node src/server.js",
     "electron": "electron .",
-    "pack:mac-arm64": "electron-packager . CIKE --icon=electron/assets/icon.icns --platform=darwin --arch=arm64 --out=dist --overwrite --prune --ignore=\"^/(test|.browsers|dist|.*.zip$)\""
+    "pack:mac-arm64": "electron-packager . CIKE --icon=electron/assets/icon.icns --platform=darwin --arch=arm64 --out=dist --overwrite --prune --ignore=\"^/(test|.browsers|dist|.*.zip$)\"",
+    "pack:win-x64": "node scripts/package-windows.cjs"
   },
   "type": "commonjs",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "devDependencies": {
     "electron": "44.10.0",
     "electron-packager": "npm:@electron/packager@20.3.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hanxin1997/cike.git"
   }
 }

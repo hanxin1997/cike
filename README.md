@@ -6,15 +6,17 @@
 
 <p align="center">本地多环境浏览器 · 独立会话 · 代理管理 · 自动化 API</p>
 
-## Windows 版本说明
+## Windows 便携版（本仓库维护）
 
-当前正式发布仅提供 Apple 芯片版 macOS 安装包。维护者目前没有可用于完整测试的 Windows 设备，因此暂不合并和发布未经实际验证的 Windows 构建，避免提供无法确认能否安装、启动和更新的版本。
+本仓库是 hanxin1997/cike 的 Windows 版本，基于 chainfix/cike 独立维护，不再自动拉取上游源码。Windows 构建和软件更新均使用本仓库。
 
-当前已提交的 Windows 相关 Pull Request 不会被合并，包括 Windows 安装包、打包流程和相关运行时改动；这些改动可以保留在各自的独立分支中。
+- 从本仓库 Releases 下载 CIKE-版本号-win-x64.zip，完整解压到可写目录（例如 D:\CIKE），运行 CIKE.exe。
+- 内核位于程序旁的 browsers，环境、Cookie、缓存与临时文件位于 data，网页下载位于 Downloads。
+- 设置页下载 Chromium 后创建并打开环境。内核下载支持系统代理；HTTP/HTTPS/SOCKS5 代理检测使用 Windows 系统 curl。
+- 启动后检查本仓库正式版本，确认后下载、校验并更新程序；更新保留 data、browsers 和 Downloads。旧试用版需先手动安装一次新版。
+- 目录移动、旧版 C 盘数据迁移、更新恢复和验证范围见 [Windows 使用与验收说明](docs/WINDOWS-ACCEPTANCE.md)。
 
-需要 Windows 版本的用户请基于当前代码另行建立分支进行改造、构建和测试。暂不接受将这类改动合并到主分支，也不将其纳入正式发布。
-
-
+下文保留上游 macOS 功能介绍和历史记录；其中 macOS 安装/签名说明不适用于 Windows ZIP。
 
 发布流程会检查应用图标、应用签名和 DMG 完整性，并提供 `SHA256SUMS.txt` 供核对下载文件。
 
@@ -191,7 +193,7 @@ socks5://用户名:密码@host:port
 
 ## 数据保存
 
-默认数据目录为 `~/.local-fingerprint-browser/`，可从设置页打开。通过环境变量 `LFB_DATA` 可以指定其他目录。
+Windows 默认数据目录为 `CIKE.exe` 同级的 `data`，内核为 `browsers`，网页下载为 `Downloads`；设置页显示实际路径。通过环境变量 `LFB_DATA` 可以指定完整数据根。macOS 沿用 `~/.local-fingerprint-browser/`。
 
 这里保存环境配置、代理配置、浏览器会话数据和本地 API 凭据。备份时建议先关闭所有浏览器环境并退出应用，再复制整个数据目录；删除该目录会丢失其中保存的数据。
 

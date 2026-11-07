@@ -7,3 +7,9 @@ data/
 *.zip
 electron/dist/
 Thumbs.db
+browsers/
+Downloads/
+.ci-runtime/
+.workflow-publish/
+.workflow-validation/
+.workflow-validation-*/

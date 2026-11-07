@@ -753,6 +753,9 @@ async function loadSettings() {
   document.getElementById('set-socks-system-proxy').value = settings.socksViaSystemProxy ? 'yes' : 'no';
   document.getElementById('set-api-url').value = apiBase() + '/';
   document.getElementById('set-api-token').value = token();
+  document.getElementById('set-data-dir').value = window.lfb.paths?.dataDir || '';
+  document.getElementById('set-browser-dir').value = window.lfb.paths?.browserDir || '';
+  document.getElementById('set-downloads-dir').value = window.lfb.paths?.downloadsDir || '';
   try {
     const { version, name } = await api('/api/getVersion');
     document.getElementById('about-box').innerHTML =
@@ -790,12 +793,13 @@ async function startChromiumDownload() {
   btn.disabled = true;
   bar.classList.remove('hidden');
   const fill = bar.querySelector('.bar');
-  window.lfb.onChromiumProgress((p) => { fill.style.width = (p.pct || 0) + '%'; });
+  const unsubscribe = window.lfb.onChromiumProgress((p) => { fill.style.width = (p.pct || 0) + '%'; });
   try {
     const r = await window.lfb.chromiumDownload();
     if (!r.ok) throw new Error(r.error);
     toast('Chromium 下载完成');
   } catch (e) { toast('下载失败：' + e.message, true); }
+  finally { unsubscribe(); }
   bar.classList.add('hidden');
   await refreshChromiumStatus();
 }
@@ -816,21 +820,47 @@ document.getElementById('btn-save-proxy-route').onclick = async () => {
     toast('代理连接设置已保存');
   } catch (e) { toast(e.message, true); }
 };
-document.getElementById('btn-check-update').onclick = async () => {
+let updateInfo = null, checkingUpdate = false;
+async function refreshUpdate(automatic = false) {
+  if (checkingUpdate) return;
+  checkingUpdate = true;
   const status = document.getElementById('update-status');
+  const checkButton = document.getElementById('btn-check-update');
+  const installButton = document.getElementById('btn-install-update');
+  checkButton.disabled = true;
+  installButton.classList.add('hidden');
   status.textContent = '正在检查…';
   try {
     const info = await window.lfb.checkUpdate();
+    updateInfo = info;
     status.textContent = info.available ? `发现新版本 ${info.latest}（当前 ${info.current}）` : `已是最新版本 ${info.current}`;
-    document.getElementById('btn-install-update').classList.toggle('hidden', !info.available);
-  } catch (e) { status.textContent = '检查失败'; toast(e.message, true); }
-};
+    installButton.classList.toggle('hidden', !(info.available && info.supportsInstall));
+    if (info.available && !info.supportsInstall) status.textContent += '；此运行方式请手动安装新版';
+    if (automatic && info.available) toast(`发现 CIKE ${info.latest}，请到设置页确认更新`);
+  } catch (e) {
+    updateInfo = null;
+    status.textContent = `暂时无法检查更新：${e.message}`;
+    if (!automatic) toast(e.message, true);
+  } finally { checkingUpdate = false; checkButton.disabled = false; }
+}
+document.getElementById('btn-check-update').onclick = () => refreshUpdate(false);
 document.getElementById('btn-install-update').onclick = async () => {
+  if (!updateInfo?.available) return;
+  if (!confirm(`安装 CIKE ${updateInfo.latest}？\n下载并校验成功后将关闭所有浏览器环境并重启应用。请先完成正在进行的下载。\n环境数据、内核和下载文件会保留。`)) return;
   const button = document.getElementById('btn-install-update');
+  const checkButton = document.getElementById('btn-check-update');
   button.disabled = true;
-  document.getElementById('update-status').textContent = '正在下载并安装…';
-  try { await window.lfb.installUpdate(); }
-  catch (e) { button.disabled = false; document.getElementById('update-status').textContent = '安装失败'; toast(e.message, true); }
+  checkButton.disabled = true;
+  const status = document.getElementById('update-status');
+  status.textContent = '正在下载并校验…';
+  const unsubscribe = window.lfb.onUpdateProgress(progress => {
+    status.textContent = progress.message || (Number.isFinite(progress.pct) ? `下载更新 ${progress.pct}%` : '正在准备更新…');
+  });
+  try {
+    const result = await window.lfb.installUpdate();
+    if (!result?.handoff) { status.textContent = '无需安装更新'; await refreshUpdate(); }
+  } catch (e) { status.textContent = `更新未完成：${e.message}`; toast(e.message, true); }
+  finally { unsubscribe(); button.disabled = false; checkButton.disabled = false; }
 };
 document.getElementById('btn-banner-download').onclick = () => { showPage('settings'); startChromiumDownload(); };
 document.getElementById('btn-token-show').onclick = (e) => {
@@ -857,4 +887,6 @@ document.getElementById('btn-open-data').onclick = () => window.lfb.openDataDir(
   await loadProfiles();
   await loadProxies();
   showPage('profiles');
+  // Check once after startup; installing always requires the explicit confirmation above.
+  if (window.lfb.packaged) setTimeout(() => refreshUpdate(true), 2500);
 })();

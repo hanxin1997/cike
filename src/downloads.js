@@ -6,7 +6,9 @@ const os = require('os');
 // Set native preferences before launching the profile. Chromium's native
 // download manager preserves filenames, numbers collisions and records the
 // permanent path in chrome://downloads. CDP's `allow` policy overwrites names.
-async function prepareDownloads(profileDirectory, directory = path.join(os.homedir(), 'Downloads')) {
+async function prepareDownloads(profileDirectory, directory = process.platform === 'win32'
+  ? require('./runtime-paths').pathsForData(path.dirname(path.dirname(profileDirectory))).downloadsDir
+  : path.join(os.homedir(), 'Downloads')) {
   directory = path.resolve(directory);
   await fs.mkdir(directory, { recursive: true });
   const defaultDirectory = path.join(profileDirectory, 'Default');

@@ -1,176 +1,109 @@
-name: Build Windows from upstream
+name: Build Windows
 
-# This repository only needs this workflow. Source stays in chainfix/cike.
 "on":
   workflow_dispatch:
     inputs:
-      upstream_ref:
-        description: 'Upstream branch, tag or commit (chainfix/cike)'
+      publish:
+        description: 'Publish this tested version to this repository Releases'
         required: true
-        default: main
-        type: string
-  schedule:
-    # Daily at 10:17 Asia/Shanghai (02:17 UTC); GitHub may delay scheduled runs.
-    # Enable Actions and keep this file on the default branch. GitHub can disable
-    # schedules in public repositories after 60 days without repository activity.
-    - cron: '17 2 * * *'
+        default: false
+        type: boolean
+  pull_request:
+    branches: [main]
 
 permissions:
   contents: read
 
 concurrency:
-  group: build-windows-upstream
+  group: windows-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
   build:
-    name: Package upstream for Windows x64
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     defaults:
       run:
         shell: pwsh
-        working-directory: upstream
     env:
-      # This trial package contains Electron and application code, not Chromium.
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
-
+    outputs:
+      version: ${{ steps.archive.outputs.version }}
     steps:
-      - name: Check out upstream source
-        uses: actions/checkout@v7
+      # Always build this repository. Upstream changes are adopted explicitly by its owner.
+      - uses: actions/checkout@v7
         with:
-          repository: chainfix/cike
-          ref: ${{ inputs.upstream_ref || 'main' }}
-          path: upstream
-          fetch-depth: 1
-          # npm lifecycle scripts do not need a stored GitHub credential.
           persist-credentials: false
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
           cache: npm
-          cache-dependency-path: upstream/package-lock.json
-
-      - name: Record source identity
-        id: source
+      - name: Install locked dependencies
         run: |
-          $ErrorActionPreference = 'Stop'
-          $package = Get-Content -LiteralPath package.json -Raw | ConvertFrom-Json
-          $version = [string]$package.version
-          if ($version -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$') {
-            throw 'Upstream package.json has an unsupported version format.'
-          }
-          $commit = git rev-parse HEAD
-          if ($LASTEXITCODE -ne 0 -or $commit -notmatch '^[a-f0-9]{40}$') {
-            throw 'Unable to determine the upstream commit.'
-          }
-          "version=$version" >> $env:GITHUB_OUTPUT
-          "commit=$commit" >> $env:GITHUB_OUTPUT
-          "short_sha=$($commit.Substring(0, 12))" >> $env:GITHUB_OUTPUT
-
-      - name: Install upstream dependencies
-        run: |
-          $ErrorActionPreference = 'Stop'
           npm ci
           if ($LASTEXITCODE -ne 0) { throw 'npm ci failed.' }
-
-      - name: Package Windows application
+      - name: Install and verify Chromium through application code
         run: |
-          $ErrorActionPreference = 'Stop'
-          # Use the packager already locked by upstream; do not fetch a new one.
-          $packager = '.\node_modules\electron-packager\bin\electron-packager.mjs'
-          if (-not (Test-Path -LiteralPath $packager -PathType Leaf)) {
-            throw 'Upstream no longer supplies electron-packager; review this workflow.'
-          }
-          # Invoke Node directly: a .cmd shim can interpret the regex pipes as shell operators.
-          # Packager 20's CLI defaults to ASAR; the resource checks below require expanded files.
-          node $packager . CIKE --platform=win32 --arch=x64 --out=dist --overwrite --prune --no-asar '--ignore=^/(test|tests|\.browsers|dist|\.git|\.github|data)(/|$)'
+          node scripts/prepare-test-browser.cjs
+          if ($LASTEXITCODE -ne 0) { throw 'Application Chromium installation failed.' }
+      - name: Security, network, portable paths and update regression tests
+        run: |
+          npm test
+          if ($LASTEXITCODE -ne 0) { throw 'Regression tests failed.' }
+      - name: Desktop integration tests
+        run: |
+          npm run test:desktop
+          if ($LASTEXITCODE -ne 0) { throw 'Desktop integration tests failed.' }
+      - name: Package Windows x64
+        run: |
+          npm run pack:win-x64
           if ($LASTEXITCODE -ne 0) { throw 'Windows packaging failed.' }
-
-      - name: Verify package and create ZIP
-        env:
-          APP_VERSION: ${{ steps.source.outputs.version }}
-          UPSTREAM_COMMIT: ${{ steps.source.outputs.commit }}
-          UPSTREAM_SHORT_SHA: ${{ steps.source.outputs.short_sha }}
+      - name: Test packaged portable app, kernel download and relocation
         run: |
-          $ErrorActionPreference = 'Stop'
-          $bundle = Join-Path $PWD 'dist/CIKE-win32-x64'
-          # These checks verify the package layout, not Windows runtime support.
-          foreach ($relative in @(
-            'CIKE.exe',
-            'resources/app/package.json',
-            'resources/app/electron/main.js',
-            'resources/app/electron/preload.js',
-            'resources/app/electron/renderer/index.html',
-            'resources/app/src/server.js',
-            'resources/app/node_modules/playwright/package.json',
-            'resources/app/node_modules/playwright-core/browsers.json',
-            'resources/app/node_modules/koa/package.json',
-            'resources/app/node_modules/@koa/router/package.json'
-          )) {
-            if (-not (Test-Path -LiteralPath (Join-Path $bundle $relative) -PathType Leaf)) {
-              throw "Incomplete application package: $relative"
-            }
-          }
-          $packaged = Get-Content -LiteralPath (Join-Path $bundle 'resources/app/package.json') -Raw | ConvertFrom-Json
-          if ($packaged.version -ne $env:APP_VERSION) { throw 'Packaged version does not match upstream.' }
-
-          $artifactDir = Join-Path $env:GITHUB_WORKSPACE 'artifacts'
-          New-Item -ItemType Directory -Path $artifactDir -Force | Out-Null
-          $zipName = "CIKE-$($env:APP_VERSION)-win-x64-$($env:UPSTREAM_SHORT_SHA).zip"
-          $zipPath = Join-Path $artifactDir $zipName
-          $sourceUrl = "https://github.com/chainfix/cike/commit/$($env:UPSTREAM_COMMIT)"
-          $buildUrl = "$($env:GITHUB_SERVER_URL)/$($env:GITHUB_REPOSITORY)/actions/runs/$($env:GITHUB_RUN_ID)"
-          $notes = @(
-            "CIKE $($env:APP_VERSION) - Windows x64 trial package",
-            "Upstream commit: $($env:UPSTREAM_COMMIT)",
-            "Source: $sourceUrl",
-            "Build: $buildUrl",
-            "Built at (UTC): $([DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ'))",
-            '',
-            'Extract the entire ZIP, then run CIKE-win32-x64/CIKE.exe.',
-            'Application data uses the upstream default location or LFB_DATA.',
-            'This workflow packages unmodified upstream source. It adds no automatic updater.',
-            'Known limitations of the reviewed upstream revision:',
-            '- Chromium is not bundled. In-app installation uses Unix-specific unzip/version commands.',
-            '- Proxy checking uses /usr/bin/curl, which is not a standard Windows path.',
-            '- The update UI targets macOS; Windows in-app installation is unsupported.',
-            '- API path-case authentication and Windows file ACL concerns remain unpatched.',
-            'No Windows functional tests or signing are performed by this workflow.',
-            'A successful build verifies packaging only. Test before using real profiles or credentials.'
-          )
-          $notes | Set-Content -LiteralPath (Join-Path $bundle 'BUILD-INFO.txt') -Encoding utf8
-          $notes | Set-Content -LiteralPath (Join-Path $artifactDir 'BUILD-INFO.txt') -Encoding utf8
-
-          # Keep all Electron DLLs and resources together; a lone CIKE.exe is insufficient.
-          Compress-Archive -LiteralPath $bundle -DestinationPath $zipPath -CompressionLevel Optimal
-          $digest = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$digest  $zipName" | Set-Content -LiteralPath (Join-Path $artifactDir 'SHA256SUMS-win-x64.txt') -Encoding ascii
-
-          @(
-            '## Windows x64 trial build',
-            '',
-            "Version: $($env:APP_VERSION)",
-            "Upstream: $sourceUrl",
-            "ZIP: $zipName",
-            '',
-            'Download the artifact below, extract its application ZIP, and run CIKE-win32-x64/CIKE.exe.',
-            'Packaging checks passed; Windows application behavior has not been validated.',
-            'Chromium installation, proxy detection, update UI and known security issues remain upstream behavior.',
-            'See BUILD-INFO.txt for limitations and the exact source commit.'
-          ) >> $env:GITHUB_STEP_SUMMARY
-
-      - name: Upload Windows ZIP and checksums
-        uses: actions/upload-artifact@v7
+          $env:CIKE_TEST_APP = Join-Path $PWD 'dist/CIKE-win32-x64/CIKE.exe'
+          node --test test/portable-desktop.test.js
+          if ($LASTEXITCODE -ne 0) { throw 'Packaged portable application tests failed.' }
+      - name: Verify package and create ZIP
+        id: archive
+        run: ./scripts/archive-windows.ps1
+      - name: Verify real update handoff and restart
+        run: |
+          $env:CIKE_TEST_APP = Join-Path $PWD 'dist/CIKE-win32-x64/CIKE.exe'
+          node --test test/update-desktop.test.js
+          if ($LASTEXITCODE -ne 0) { throw 'Real packaged update and restart test failed.' }
+      - uses: actions/upload-artifact@v7
         with:
-          name: CIKE-${{ steps.source.outputs.version }}-win-x64-${{ steps.source.outputs.short_sha }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            artifacts/*.zip
-            artifacts/SHA256SUMS-win-x64.txt
-            artifacts/BUILD-INFO.txt
+          name: CIKE-${{ steps.archive.outputs.version }}-win-x64-${{ github.run_id }}
+          path: artifacts/*
           if-no-files-found: error
           retention-days: 14
-          # ZIP is already compressed; avoid spending runner time compressing it again.
           compression-level: 0
+
+  publish:
+    needs: build
+    if: github.event_name == 'workflow_dispatch' && inputs.publish && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: CIKE-${{ needs.build.outputs.version }}-win-x64-${{ github.run_id }}
+          path: artifacts
+      - name: Publish verified Windows release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_VERSION: ${{ needs.build.outputs.version }}
+          BUILD_COMMIT: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          # Refuse duplicate versions: a release should identify one immutable tested build.
+          if gh release view "v$RELEASE_VERSION" >/dev/null 2>&1; then
+            echo 'This version already exists. Bump package.json and package-lock.json before publishing.' >&2
+            exit 1
+          fi
+          cp artifacts/BUILD-INFO.txt release-notes.txt
+          gh release create "v$RELEASE_VERSION" --target "$BUILD_COMMIT" --title "CIKE $RELEASE_VERSION for Windows" --notes-file release-notes.txt artifacts/*.zip artifacts/SHA256SUMS-win-x64.txt artifacts/BUILD-INFO.txt

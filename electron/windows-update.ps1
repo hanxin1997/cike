@@ -1,6 +1,7 @@
 param(
   [string] $Manifest,
-  [switch] $LibraryOnly
+  [switch] $LibraryOnly,
+  [switch] $Launch
 )
 $ErrorActionPreference = 'Stop'
 # Resolve required cmdlets directly from the current system PowerShell install;
@@ -256,4 +257,16 @@ function Invoke-Update([string] $File) {
 
 if ($LibraryOnly) { return }
 if (-not $Manifest) { throw 'Manifest path is required' }
+if ($Launch) {
+  # Node's detached process flags prevent Windows PowerShell from running. Its
+  # regular child also dies with Node's job. Start-Process creates an independent
+  # hidden helper; this launcher waits so readiness/early-exit checks still work.
+  $state = Read-UpdateManifest $Manifest
+  $helperScript = Join-Path $state.transaction 'windows-update.ps1'
+  if ((Get-FullPath $PSCommandPath) -ne (Get-FullPath $helperScript)) { throw 'Launcher is outside the update transaction' }
+  $arguments = '-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + $helperScript + '" -Manifest "' + (Get-FullPath $Manifest) + '"'
+  $helper = Start-Process -FilePath (Join-Path $PSHOME 'powershell.exe') -ArgumentList $arguments -WorkingDirectory $state.transaction -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $state.transaction 'helper-stdout.log') -RedirectStandardError (Join-Path $state.transaction 'helper-stderr.log')
+  $helper.WaitForExit()
+  exit $helper.ExitCode
+}
 exit (Invoke-Update $Manifest)

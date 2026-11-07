@@ -225,10 +225,27 @@ async function waitForHelper(transaction, child, timeout = 120000) {
       if (status.phase === 'waiting-for-exit') return;
       if (['failed', 'rolled-back', 'recovery-required'].includes(status.phase)) throw new Error(status.error || '更新助手启动失败');
     } catch (error) { if (error.code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error; }
-    if (child.exitCode !== null) throw new Error('更新助手提前退出');
+    if (child.exitCode !== null || child.signalCode) throw new Error(`更新助手提前退出 (exit=${child.exitCode}, signal=${child.signalCode || 'none'})`);
     await new Promise(resolve => setTimeout(resolve, 100));
   }
   throw new Error('更新助手启动超时');
+}
+
+async function startWindowsHelper(transaction, environment) {
+  const { systemExecutable } = require('../src/platform');
+  const log = fs.openSync(path.join(transaction, 'helper.log'), 'a');
+  let child;
+  try {
+    // Windows PowerShell exits before executing a script with Node's detached
+    // flags. A hidden launcher creates the independent helper with Start-Process.
+    child = spawn(systemExecutable('powershell'), ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', path.join(transaction, 'windows-update.ps1'), '-Manifest', path.join(transaction, 'manifest.json'), '-Launch'], {
+      cwd: transaction, env: environment, windowsHide: true, stdio: ['ignore', log, log],
+    });
+    await new Promise((resolve, reject) => { child.once('spawn', resolve); child.once('error', reject); });
+    await waitForHelper(transaction, child);
+    return child;
+  } catch (error) { child?.unref(); throw error; }
+  finally { fs.closeSync(log); }
 }
 
 function restartEnvironment(base, source = process.env, paths) {
@@ -249,7 +266,7 @@ function restartEnvironment(base, source = process.env, paths) {
 async function installWindows(info, options) {
   const { paths, beforeQuit, onProgress } = options;
   if (!paths?.baseDir || !paths?.updatesDir || !paths?.dataDir) throw new Error('Windows 更新缺少便携目录配置');
-  const { extractZip, executableVersion, systemExecutable, systemEnvironment } = require('../src/platform');
+  const { extractZip, executableVersion, systemEnvironment } = require('../src/platform');
   const root = path.resolve(paths.baseDir);
   if (path.dirname(process.execPath).toLowerCase() !== root.toLowerCase() && !options.app) throw new Error('更新目录与当前程序位置不一致');
   protectedPaths(paths); noLinks(root); noLinks(paths.updatesDir);
@@ -289,15 +306,7 @@ async function installWindows(info, options) {
     };
     writeJSON(path.join(transaction, 'manifest.json'), manifest);
     fs.copyFileSync(path.join(__dirname, 'windows-update.ps1'), path.join(transaction, 'windows-update.ps1'));
-    const log = fs.openSync(path.join(transaction, 'helper.log'), 'a');
-    try {
-      const environment = restartEnvironment(systemEnvironment(), process.env, paths);
-      child = spawn(systemExecutable('powershell'), ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', path.join(transaction, 'windows-update.ps1'), '-Manifest', path.join(transaction, 'manifest.json')], {
-        cwd: transaction, env: environment, detached: true, windowsHide: true, stdio: ['ignore', log, log],
-      });
-      await new Promise((resolve, reject) => { child.once('spawn', resolve); child.once('error', reject); });
-      await waitForHelper(transaction, child);
-    } finally { fs.closeSync(log); }
+    child = await startWindowsHelper(transaction, restartEnvironment(systemEnvironment(), process.env, paths));
     // The helper has no authority to replace files until shutdown succeeds and this token is written.
     await beforeQuit?.();
     writeJSON(pending, { transactionId, version: info.latest, root, confirmationToken: manifest.confirmationToken });
@@ -382,4 +391,4 @@ async function confirmUpdateStartup(paths, options = {}) {
   return { confirmed: false, phase: status.phase };
 }
 
-module.exports = { checkUpdate, installUpdate, confirmUpdateStartup, _test: { get, compare, selectRelease, validateURL, checksumFor, verifyChecksum, validatePackage, protectedPaths, inside, programEntry, restartEnvironment } };
+module.exports = { checkUpdate, installUpdate, confirmUpdateStartup, _test: { get, compare, selectRelease, validateURL, checksumFor, verifyChecksum, validatePackage, protectedPaths, inside, programEntry, restartEnvironment, startWindowsHelper } };

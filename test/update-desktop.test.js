@@ -72,7 +72,7 @@ test('packaged updater hands off to the real Windows helper, restarts and preser
     // leaves files open while the fixture is being cleaned up.
     try {
       for (const name of fs.readdirSync(path.join(directory, 'data/updates'))) {
-        for (const log of ['status.json','helper.log','preparation-error.json']) {
+        for (const log of ['status.json','helper.log','helper-stdout.log','helper-stderr.log','preparation-error.json']) {
           const file = path.join(directory, 'data/updates', name, log);
           if (fs.existsSync(file)) console.error(`${log}: ${fs.readFileSync(file, 'utf8')}`);
         }

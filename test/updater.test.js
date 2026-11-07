@@ -188,6 +188,48 @@ if ($Scenario -eq 'success' -or $Scenario -eq 'startup-failure') {
 throw 'Unknown scenario'
 `;
 
+test('real update helper starts hidden and survives the application parent exiting', { skip: process.platform !== 'win32', timeout: 45000 }, async () => {
+  const fixture = makeFixture();
+  try {
+    const transaction = fixture.state.transaction;
+    fs.copyFileSync(path.resolve(__dirname, '../electron/windows-update.ps1'), path.join(transaction, 'windows-update.ps1'));
+    const runner = path.join(transaction, 'parent.cjs');
+    // Run the production launcher in a disposable parent. After it exits, only
+    // an independent helper can observe cancellation and write the final status.
+    write(runner, `
+      const fs = require('fs');
+      const { _test: updater } = require(${JSON.stringify(path.resolve(__dirname, '../electron/updater.js'))});
+      const { systemEnvironment } = require(${JSON.stringify(path.resolve(__dirname, '../src/platform.js'))});
+      const manifestFile = ${JSON.stringify(fixture.manifest)};
+      const manifest = JSON.parse(fs.readFileSync(manifestFile));
+      manifest.parentPid = process.pid;
+      fs.writeFileSync(manifestFile, JSON.stringify(manifest));
+      updater.startWindowsHelper(${JSON.stringify(transaction)}, systemEnvironment())
+        .then(() => process.exit(0))
+        .catch(error => { console.error(error); process.exit(1); });
+    `);
+    execFileSync(process.execPath, [runner], { windowsHide: true, timeout: 30000, encoding: 'utf8' });
+    write(path.join(transaction, 'cancel'), 'cancel');
+    let status;
+    const deadline = Date.now() + 10000;
+    while (Date.now() < deadline) {
+      try { status = JSON.parse(fs.readFileSync(path.join(transaction, 'status.json'), 'utf8').replace(/^\uFEFF/, '')); } catch {}
+      if (status?.phase === 'failed') break;
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    assert.equal(status?.phase, 'failed', JSON.stringify(status));
+    assert.match(status.error, /cancelled/);
+    preserved(fixture);
+    assert.equal(fs.readFileSync(path.join(fixture.root, 'CIKE.exe'), 'utf8'), 'old executable');
+  } finally {
+    // A cancellation does not replace files, and lets a started helper release
+    // its logs before removing this test-owned directory.
+    write(path.join(fixture.state.transaction, 'cancel'), 'cancel');
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    fs.rmSync(fixture.root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+  }
+});
+
 for (const scenario of ['success', 'copy-failure', 'locked', 'startup-failure', 'tamper']) {
   test(`Windows helper ${scenario}: transaction preserves data with module auto-loading disabled`, { skip: process.platform !== 'win32' }, () => {
     const fixture = makeFixture();

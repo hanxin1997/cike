@@ -44,8 +44,6 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'npm ci failed.' }
       - name: Install and verify Chromium through application code
         run: |
-          node scripts/diagnose-windows.cjs
-          if ($LASTEXITCODE -ne 0) { throw 'Windows tool diagnostics failed.' }
           node scripts/prepare-test-browser.cjs
           if ($LASTEXITCODE -ne 0) { throw 'Application Chromium installation failed.' }
       - name: Security, network, portable paths and update regression tests

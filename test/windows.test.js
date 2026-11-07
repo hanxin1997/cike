@@ -77,6 +77,42 @@ test('Windows helpers use absolute system tools and drop inherited proxy overrid
   assert.equal(env.HTTPS_PROXY, undefined); assert.equal(env.NO_PROXY, undefined);
 });
 
+test('Windows helper environment retains account directories and starts module discovery at the OS', () => {
+  const source = { SystemRoot: 'C:\\Windows', USERPROFILE: 'C:\\Users\\runneradmin',
+    APPDATA: 'C:\\Users\\runneradmin\\AppData\\Roaming', LOCALAPPDATA: 'C:\\Users\\runneradmin\\AppData\\Local',
+    ProgramFiles: 'C:\\Program Files', ProgramData: 'C:\\ProgramData',
+    HOMEDRIVE: 'C:', HOMEPATH: '\\Users\\runneradmin', TEMP: 'D:\\CIKE\\data\\temp', TMP: 'D:\\CIKE\\data\\temp',
+    PSModulePath: '\\\\unavailable.invalid\\modules', NODE_OPTIONS: '--require unwanted.js',
+    POWERSHELL_TELEMETRY_OPTOUT: '0', HTTPS_PROXY: 'http://unwanted.invalid', CURL_HOME: 'D:\\unwanted' };
+  const result = systemEnvironment({ platform: 'win32', env: source });
+  for (const key of ['USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'ProgramFiles', 'ProgramData', 'HOMEDRIVE', 'HOMEPATH', 'TEMP', 'TMP']) {
+    assert.equal(result[key], source[key], `required Windows environment variable ${key} was lost`);
+  }
+  assert.equal(result.PSModulePath, 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\Modules');
+  for (const key of ['NODE_OPTIONS', 'HTTPS_PROXY', 'CURL_HOME']) assert.equal(result[key], undefined);
+});
+
+test('Windows helper starts the actual system PowerShell with a bounded module path and usable account environment', { skip: process.platform !== 'win32' }, () => {
+  const { execFileSync } = require('node:child_process');
+  const environment = systemEnvironment({ env: { ...process.env, PSModulePath: '\\\\unavailable.invalid\\modules' } });
+  const script = '$ErrorActionPreference = "Stop"; $ProgressPreference = "SilentlyContinue"; $command = Get-Command Get-Acl -ErrorAction Stop; [pscustomobject]@{ modulePath = $env:PSModulePath; moduleFile = $command.Module.Path; appdata = $env:APPDATA; localappdata = $env:LOCALAPPDATA; userprofile = $env:USERPROFILE } | ConvertTo-Json -Compress';
+  const result = JSON.parse(execFileSync(systemExecutable('powershell'), ['-NoLogo', '-NoProfile', '-NonInteractive',
+    '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')],
+  { env: environment, windowsHide: true, timeout: 15000, encoding: 'utf8' }));
+  const systemModules = path.join(path.dirname(systemExecutable('powershell')), 'Modules');
+  const modules = result.modulePath.split(';').filter(Boolean).map(value => path.resolve(value).toLowerCase());
+  // PowerShell 5 itself can prepend its standard machine module directory.
+  // Neither inherited UNC paths, user modules nor unexpanded environment
+  // strings may be introduced into its effective discovery path.
+  const allowed = [systemModules.toLowerCase(), path.join(process.env.ProgramFiles, 'WindowsPowerShell', 'Modules').toLowerCase()];
+  assert.ok(modules.includes(systemModules.toLowerCase()));
+  for (const modulePath of modules) assert.ok(allowed.includes(modulePath), `unexpected module search path: ${modulePath}`);
+  assert.ok(path.resolve(result.moduleFile).toLowerCase().startsWith(systemModules.toLowerCase() + path.sep));
+  assert.equal(result.appdata, process.env.APPDATA);
+  assert.equal(result.localappdata, process.env.LOCALAPPDATA);
+  assert.equal(result.userprofile, process.env.USERPROFILE);
+});
+
 test('Windows reads real PE versions without launching the executable', { skip: process.platform !== 'win32' }, async () => {
   const version = await executableVersion(process.execPath);
   assert.match(version, /^\d+\.\d+\.\d+\.\d+$/);

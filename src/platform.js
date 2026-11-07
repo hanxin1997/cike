@@ -24,11 +24,21 @@ function systemExecutable(name, { platform = process.platform, env = process.env
 function systemEnvironment({ platform = process.platform, env = process.env } = {}) {
   if (platform !== 'win32') return { PATH: '/usr/bin:/bin', LANG: 'C', ...(env.HOME ? { HOME: env.HOME } : {}) };
   const root = systemRoot(env);
-  // No proxy, curl config, or user PATH variables enter the system helper.
-  return { SystemRoot: root, WINDIR: root, ComSpec: path.win32.join(root, 'System32', 'cmd.exe'),
-    PATH: path.win32.join(root, 'System32'),
-    ...(env.TEMP ? { TEMP: env.TEMP } : {}), ...(env.TMP ? { TMP: env.TMP } : {}),
-    ...(env.USERPROFILE ? { USERPROFILE: env.USERPROFILE } : {}) };
+  const system = path.win32.join(root, 'System32');
+  const result = { SystemRoot: root, WINDIR: root, ComSpec: path.win32.join(system, 'cmd.exe'), PATH: system,
+    // Without an explicit module path, Windows PowerShell synthesizes user and
+    // machine module search paths, including unresolved %ProgramFiles% when a
+    // service launcher omitted it. Start with inbox modules; PowerShell 5 can
+    // add its standard machine module directory, but not user search roots.
+    PSModulePath: path.win32.join(system, 'WindowsPowerShell', 'v1.0', 'Modules') };
+  // PowerShell/.NET use these known Windows folders during first-use setup.
+  // Preserve the service account's real directories rather than inventing a
+  // profile, while excluding proxy variables, curl config and process hooks.
+  for (const key of ['TEMP', 'TMP', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'HOMEDRIVE', 'HOMEPATH',
+    'ProgramData', 'ALLUSERSPROFILE', 'ProgramFiles', 'ProgramFiles(x86)', 'CommonProgramFiles', 'CommonProgramFiles(x86)']) {
+    if (env[key]) result[key] = env[key];
+  }
+  return result;
 }
 
 async function windowsOperation(operation, args, options) {

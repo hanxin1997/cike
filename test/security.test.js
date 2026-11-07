@@ -200,6 +200,21 @@ test('Windows private-directory protection refuses a drive root', { skip: proces
   assert.throws(() => privateDirectory(path.parse(process.cwd()).root), /磁盘根目录/);
 });
 
+test('Windows ACL helper works without PowerShell module autoloading', { skip: process.platform !== 'win32' }, () => {
+  const dir = temp();
+  try {
+    const { systemExecutable, systemEnvironment } = require('../src/platform');
+    // A clean hosted runner may spend its first helper invocation discovering
+    // modules. ACL protection must require only the system .NET runtime.
+    const command = "$ErrorActionPreference = 'Stop'; $PSModuleAutoLoadingPreference = 'None'; & $env:CIKE_ACL_SCRIPT -TargetPath $env:CIKE_ACL_TARGET -Kind Directory";
+    cp.execFileSync(systemExecutable('powershell'), ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', command], {
+      windowsHide: true, encoding: 'utf8', timeout: 30000, stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...systemEnvironment(), CIKE_ACL_SCRIPT: path.resolve(__dirname, '../src/windows-permissions.ps1'), CIKE_ACL_TARGET: dir },
+    });
+    assertPrivate(dir, true);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
 test('Windows private-file saves reuse verified ACLs and permission failures fail closed', { skip: process.platform !== 'win32' }, t => {
   const dir = temp(), data = path.join(dir, 'data');
   const original = cp.execFileSync;

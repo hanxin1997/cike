@@ -47,7 +47,10 @@ function protect(target, directory) {
     remember(target);
   } catch (error) {
     protectedPaths.delete(cacheKey(target));
-    throw new Error(`无法设置私有 Windows 权限：${path.basename(target)}；${String(error.stderr || error.message).trim()}`);
+    // Preserve the process failure (for example ETIMEDOUT) alongside the last
+    // helper stage, rather than letting captured diagnostics hide its cause.
+    const reason = [error.code, String(error.stderr || error.message).trim()].filter(Boolean).join(': ');
+    throw new Error(`无法设置私有 Windows 权限：${path.basename(target)}；${reason}`);
   }
 }
 

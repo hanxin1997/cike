@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 const { _electron } = require('playwright');
+const { copyBundle } = require('./helpers/copy-bundle');
 
 test('packaged Windows app installs its own kernel beside the executable and survives directory relocation', {
   skip: process.platform !== 'win32' || !process.env.CIKE_TEST_APP, timeout: 600000,
@@ -13,7 +14,7 @@ test('packaged Windows app installs its own kernel beside the executable and sur
   const original = path.dirname(path.resolve(process.env.CIKE_TEST_APP));
   assert.ok(fs.existsSync(path.join(original, 'CIKE.exe')), `Original package missing EXE: ${JSON.stringify(fs.readdirSync(original))}`);
   let directory = fs.mkdtempSync(path.join(fixtureRoot, 'CIKE '));
-  fs.cpSync(original, directory, { recursive: true });
+  assert.ok(copyBundle(original, directory) > 10, 'The test must copy the complete Electron distribution.');
   assert.ok(fs.existsSync(path.join(directory, 'CIKE.exe')), `Copied package missing EXE: ${JSON.stringify(fs.readdirSync(directory))}`);
   // Intentionally remove every override: old desktop tests only exercised LFB_DATA.
   const env = { ...process.env };

@@ -888,7 +888,9 @@ document.getElementById('btn-open-data').onclick = () => window.lfb.openDataDir(
   try { const { version } = await api('/api/getVersion'); document.getElementById('app-version').textContent = `v${version} · 本地运行`; } catch {}
   await loadProfiles();
   await loadProxies();
-  showPage('profiles');
+  // Startup I/O can finish after the user opens Settings. Preserve that choice
+  // instead of hiding the page (and its active kernel download controls).
+  showPage(state.page);
   // Check once after startup; installing always requires the explicit confirmation above.
   if (window.lfb.packaged) setTimeout(() => refreshUpdate(true), 2500);
 })();

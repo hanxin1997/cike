@@ -150,6 +150,24 @@ $PSModuleAutoLoadingPreference = 'None'
   } finally { fs.rmSync(temporary, { recursive: true, force: true }); }
 });
 
+test('Windows ZIP extraction accepts a normal hidden ancestor without treating it as missing', { skip: process.platform !== 'win32' }, async () => {
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'cike-hidden-'));
+  const hidden = path.join(temporary, 'hidden-parent');
+  fs.mkdirSync(hidden);
+  try {
+    const { execFileSync } = require('node:child_process');
+    const script = '[IO.File]::SetAttributes($env:CIKE_HIDDEN_TARGET, [IO.FileAttributes]::Directory -bor [IO.FileAttributes]::Hidden)';
+    execFileSync(systemExecutable('powershell'), ['-NoProfile','-NonInteractive','-Command',script], {
+      env: { ...systemEnvironment(), CIKE_HIDDEN_TARGET: hidden }, windowsHide: true, timeout: 10000,
+    });
+    const archive = path.join(temporary, 'fixture.zip');
+    fs.writeFileSync(archive, zipFixture([{ name: 'chrome-win64/test.txt', content: 'hidden-parent fixture' }]));
+    const destination = path.join(hidden, 'extracted');
+    await extractZip(archive, destination);
+    assert.equal(fs.readFileSync(path.join(destination, 'chrome-win64/test.txt'), 'utf8'), 'hidden-parent fixture');
+  } finally { fs.rmSync(temporary, { recursive: true, force: true }); }
+});
+
 test('Windows ZIP extraction supports spaces and Unicode and rejects unsafe entries before writing', { skip: process.platform !== 'win32' }, async () => {
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'cike-zip-'));
   try {

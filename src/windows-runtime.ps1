@@ -13,7 +13,7 @@ Import-Module -Name "$PSHOME\Modules\Microsoft.PowerShell.Utility\Microsoft.Powe
 [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
 
 if ($Operation -eq 'Version') {
-  $item = Get-Item -LiteralPath $Executable
+  $item = Get-Item -LiteralPath $Executable -Force
   if ($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Executable must be a regular file' }
   $version = [Diagnostics.FileVersionInfo]::GetVersionInfo($item.FullName)
   foreach ($candidate in @($version.ProductVersion, $version.FileVersion)) {
@@ -32,7 +32,7 @@ if ($Operation -eq 'Version') {
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $root = [IO.Path]::GetFullPath($Destination).TrimEnd('\', '/')
 if (Test-Path -LiteralPath $root) {
-  $rootItem = Get-Item -LiteralPath $root
+  $rootItem = Get-Item -LiteralPath $root -Force
   if (!$rootItem.PSIsContainer -or ($rootItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Destination must be a regular directory' }
   if (@(Get-ChildItem -LiteralPath $root -Force).Count -gt 0) { throw 'Extraction destination must be empty' }
 }
@@ -40,7 +40,9 @@ if (Test-Path -LiteralPath $root) {
 # not traverse an NTFS junction supplied by a previous installation.
 $parent = $root
 while ($parent) {
-  if ((Test-Path -LiteralPath $parent) -and ((Get-Item -LiteralPath $parent).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Reparse point in extraction destination' }
+  # AppData and valid portable ancestors can be hidden; inspect their attributes
+  # without confusing the Hidden flag with a missing or unsafe directory.
+  if ((Test-Path -LiteralPath $parent) -and ((Get-Item -LiteralPath $parent -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Reparse point in extraction destination' }
   $parent = [IO.Path]::GetDirectoryName($parent)
 }
 $prefix = $root + [IO.Path]::DirectorySeparatorChar

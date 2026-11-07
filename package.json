@@ -13,7 +13,7 @@
   "main": "electron/main.js",
   "name": "cike",
   "scripts": {
-    "test": "node --test --test-concurrency=1 --test-timeout=180000 test/security.test.js test/network.test.js test/runtime.test.js test/downloads.js test/environments.test.js test/windows.test.js test/portable.test.js test/updater.test.js",
+    "test": "node --test --test-concurrency=1 --test-timeout=180000 test/security.test.js test/network.test.js test/runtime.test.js test/downloads.js test/environments.test.js test/windows.test.js test/portable.test.js test/updater.test.js test/desktop-network.test.js",
     "test:desktop": "node --test test/desktop.test.js",
     "test:icons": "node --test test/profile-icons.test.js",
     "smoke": "node test/smoke.js",

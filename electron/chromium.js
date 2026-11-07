@@ -75,7 +75,7 @@ async function downloadFile(url, destination, onProgress, options = {}, redirect
   try {
     let status, location, length;
     if (options.fetch) {
-      // Electron net.fetch follows the session's system proxy configuration.
+      // The desktop transport follows the session's system proxy configuration.
       // Manual redirects let each destination retain the HTTPS requirement.
       const response = await options.fetch(url, { redirect: 'manual', signal: controller.signal, headers: { 'User-Agent': 'CIKE' } });
       status = response.status;

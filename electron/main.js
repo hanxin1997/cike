@@ -14,7 +14,7 @@ function bootstrap() {
   const { startBackend } = require('../src/server');
   const { chromiumStatus, downloadChromium, readInstalledExecutable } = require('./chromium');
   const { checkUpdate, installUpdate, confirmUpdateStartup } = require('./updater');
-  const desktopFetch = (url, options) => net.fetch(url, options);
+  const desktopFetch = require('./network').createDesktopFetch(net);
   let backend = null, mainWindow = null, quitting = false, installing = false, downloadingKernel = false;
   const uiFile = path.join(__dirname, 'renderer', 'index.html');
   const uiURL = pathToFileURL(uiFile).href;

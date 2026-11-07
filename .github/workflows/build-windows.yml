@@ -61,6 +61,8 @@ jobs:
           npm run pack:win-x64
           if ($LASTEXITCODE -ne 0) { throw 'Windows packaging failed.' }
       - name: Test packaged portable app, kernel download and relocation
+        env:
+          DEBUG: pw:browser
         run: |
           $env:CIKE_TEST_APP = Join-Path $PWD 'dist/CIKE-win32-x64/CIKE.exe'
           node --test test/portable-desktop.test.js
@@ -69,6 +71,8 @@ jobs:
         id: archive
         run: ./scripts/archive-windows.ps1
       - name: Verify real update handoff and restart
+        env:
+          DEBUG: pw:browser
         run: |
           $env:CIKE_TEST_APP = Join-Path $PWD 'dist/CIKE-win32-x64/CIKE.exe'
           node --test test/update-desktop.test.js

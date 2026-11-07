@@ -77,9 +77,14 @@ test('sandboxed desktop UI can authenticate, migrate profiles and protect secret
         await newCard.getByText('已关闭', { exact: true }).waitFor();
       }
       if (process.env.CIKE_SCREENSHOT) await page.screenshot({ path: process.env.CIKE_SCREENSHOT });
+    } catch (error) {
+      console.error('Desktop interaction failed before clipboard restoration:', error);
+      throw error;
     } finally {
       await app.evaluate(async ({ clipboard, ClipboardItem }) => {
-        const items = await Promise.all(globalThis.cikeClipboardBackup.map(async item => {
+        // A Windows hosted runner may return an empty clipboard item. Such an
+        // item represents no data and is invalid input to ClipboardItem.
+        const items = await Promise.all(globalThis.cikeClipboardBackup.filter(item => item.types.length > 0).map(async item => {
           const entries = await Promise.all(item.types.map(async type => [type, await item.getType(type)]));
           return new ClipboardItem(Object.fromEntries(entries));
         }));

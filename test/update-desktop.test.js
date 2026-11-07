@@ -15,6 +15,7 @@ test('packaged updater hands off to the real Windows helper, restarts and preser
   fs.mkdirSync(fixtureParent, { recursive: true });
   const directory = fs.mkdtempSync(path.join(fixtureParent, 'CIKE '));
   fs.cpSync(path.dirname(path.resolve(process.env.CIKE_TEST_APP)), directory, { recursive: true });
+  assert.ok(fs.existsSync(path.join(directory, 'CIKE.exe')), `Copied update fixture missing EXE: ${JSON.stringify(fs.readdirSync(directory))}`);
   const env = { ...process.env };
   for (const key of ['LFB_DATA','LFB_BROWSER_DIR','LFB_DOWNLOADS_DIR','LFB_TEMP_DIR','LFB_CHROMIUM_EXECUTABLE','CIKE_UPDATE_TOKEN']) delete env[key];
   let app, restartedPid;

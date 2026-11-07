@@ -11,8 +11,10 @@ test('packaged Windows app installs its own kernel beside the executable and sur
   const fixtureRoot = path.resolve('.ci-runtime', 'packaged-便携 test');
   fs.mkdirSync(fixtureRoot, { recursive: true });
   const original = path.dirname(path.resolve(process.env.CIKE_TEST_APP));
+  assert.ok(fs.existsSync(path.join(original, 'CIKE.exe')), `Original package missing EXE: ${JSON.stringify(fs.readdirSync(original))}`);
   let directory = fs.mkdtempSync(path.join(fixtureRoot, 'CIKE '));
   fs.cpSync(original, directory, { recursive: true });
+  assert.ok(fs.existsSync(path.join(directory, 'CIKE.exe')), `Copied package missing EXE: ${JSON.stringify(fs.readdirSync(directory))}`);
   // Intentionally remove every override: old desktop tests only exercised LFB_DATA.
   const env = { ...process.env };
   for (const name of ['LFB_DATA','LFB_BROWSER_DIR','LFB_DOWNLOADS_DIR','LFB_TEMP_DIR','LFB_CHROMIUM_EXECUTABLE']) delete env[name];
